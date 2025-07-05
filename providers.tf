@@ -15,7 +15,7 @@ provider "aws" {
 
 # Configure Terraform Backend
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.10.0"
 
   backend "s3" {
     bucket         = "terrastate-file"
