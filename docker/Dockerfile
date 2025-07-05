@@ -1,48 +1,21 @@
-# Multi-stage Docker build for Node.js application
-FROM node:18-alpine AS builder
+# Use the official nginx alpine image for smaller size
+FROM nginx:alpine
 
-# Set working directory
-WORKDIR /app
+# Remove default nginx website
+RUN rm -rf /usr/share/nginx/html/*
 
-# Copy package files
-COPY package*.json ./
+# Copy our custom website files
+COPY ./src/ /usr/share/nginx/html/
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Copy custom nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
 
-# Copy application code
-COPY . .
+# Expose port 80
+EXPOSE 80
 
-# Build application (if needed)
-RUN npm run build || echo "No build script found"
+# Add healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost/ || exit 1
 
-# Production stage
-FROM node:18-alpine AS production
-
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
-
-# Create app user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001
-
-# Set working directory
-WORKDIR /app
-
-# Copy application from builder stage
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nextjs:nodejs /app .
-
-# Switch to non-root user
-USER nextjs
-
-# Expose port
-EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-  CMD node healthcheck.js || exit 1
-
-# Start application with dumb-init
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["npm", "start"]
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
