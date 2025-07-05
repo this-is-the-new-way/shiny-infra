@@ -10,14 +10,13 @@ terraform {
   }
 
   # Configure S3 backend for shared state
-  # Uncomment and configure for production use
-  # backend "s3" {
-  #   bucket = "your-terraform-state-bucket"
-  #   key    = "base-infrastructure/terraform.tfstate"
-  #   region = "us-west-2"
-  #   
-  #   # Enable state locking with DynamoDB
-  #   dynamodb_table = "terraform-state-lock"
+  backend "s3" {
+    bucket         = "terrastate-file"
+    key            = "shiny-infra/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "terraform-state-lock"
+  }
   #   encrypt        = true
   # }
 }

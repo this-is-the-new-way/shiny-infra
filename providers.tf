@@ -13,22 +13,4 @@ provider "aws" {
   }
 }
 
-# Configure Terraform Backend
-terraform {
-  required_version = ">= 1.10.0"
-
-  backend "s3" {
-    bucket         = "terrastate-file"
-    key            = "shiny-infra/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "terraform-state-lock"
-  }
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.2"
-    }
-  }
-}
+# Note: Terraform backend and required_providers are configured in terraform.tf

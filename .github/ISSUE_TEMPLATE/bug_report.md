@@ -13,7 +13,7 @@ A clear and concise description of what the bug is.
 ## 🔍 Environment
 - **Environment**: [dev/staging/prod]
 - **Region**: [us-east-1/us-west-2/etc]
-- **Terraform Version**: [1.5.0]
+- **Terraform Version**: [1.11.0]
 - **Date/Time**: [When did this occur?]
 
 ## 🔄 Steps to Reproduce
