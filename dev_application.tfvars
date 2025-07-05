@@ -2,11 +2,11 @@
 
 # General Configuration - Free Tier Optimized
 environment  = "dev"
-project_name = "my-app"
+project_name = "base-infra"
 aws_region   = "us-east-1"  # Use us-east-1 for better free tier availability
 
 # ECS Configuration - Free Tier Optimized
-ecs_cluster_name       = "my-app-dev"
+ecs_cluster_name       = "base-infra-dev"
 ecs_capacity_providers = ["FARGATE"]  # Use only FARGATE for simplicity
 ecs_default_capacity_provider_strategy = [
   {
@@ -17,7 +17,7 @@ ecs_default_capacity_provider_strategy = [
 ]
 
 # Application Configuration - Free Tier Optimized
-app_name          = "my-app"
+app_name          = "base-infra"
 app_image         = "nginx:alpine"  # Will be replaced by ECR image after first deployment
 app_port          = 80
 app_cpu           = 256   # Minimum CPU for Fargate (0.25 vCPU)
@@ -40,11 +40,11 @@ app_secrets = {
 }
 
 # Health Check Configuration - Free Tier Optimized
-health_check_path                = "/health"  # Use dedicated health endpoint
+health_check_path                = "/"     # Use root path for nginx
 health_check_interval            = 30
 health_check_timeout             = 5
 health_check_healthy_threshold   = 2
-health_check_unhealthy_threshold = 3
+health_check_unhealthy_threshold = 2
 
 # Auto Scaling Configuration - Disabled for Free Tier
 enable_auto_scaling              = false  # Disable to save costs
@@ -65,5 +65,6 @@ enable_detailed_monitoring = false
 additional_tags = {
   Owner       = "development-team"
   Environment = "development"
+  Purpose     = "testing"
   CostCenter  = "engineering"
 }
