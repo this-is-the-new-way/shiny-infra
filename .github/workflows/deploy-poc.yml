@@ -1,0 +1,124 @@
+name: Deploy POC Infrastructure
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+
+env:
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: 1.5.0
+
+jobs:
+  # Job 1: Deploy Infrastructure
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Initialize Terraform
+      run: terraform init
+      
+    - name: Validate Terraform
+      run: terraform validate
+      
+    - name: Plan Infrastructure
+      run: |
+        ENV=${{ github.event.inputs.environment || 'dev' }}
+        terraform plan -var-file="${ENV}.tfvars" -out=tfplan
+        
+    - name: Apply Infrastructure
+      run: terraform apply -auto-approve tfplan
+
+  # Job 2: Build and Deploy Application
+  deploy-application:
+    name: Build and Deploy Application
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Initialize Terraform
+      run: terraform init
+      
+    - name: Get ECR Repository URL
+      id: ecr-url
+      run: |
+        ECR_REPO_URL=$(terraform output -raw ecr_repository_url)
+        echo "ecr_url=$ECR_REPO_URL" >> $GITHUB_OUTPUT
+        
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.ecr-url.outputs.ecr_url }}
+        
+    - name: Build Docker image
+      run: |
+        cd docker
+        docker build -t poc-app:latest .
+        docker tag poc-app:latest ${{ steps.ecr-url.outputs.ecr_url }}:latest
+        
+    - name: Push Docker image
+      run: |
+        docker push ${{ steps.ecr-url.outputs.ecr_url }}:latest
+        
+    - name: Deploy Application
+      run: |
+        ENV=${{ github.event.inputs.environment || 'dev' }}
+        
+        # Update app_image in tfvars
+        sed -i "s|app_image.*|app_image = \"${{ steps.ecr-url.outputs.ecr_url }}:latest\"|g" ${ENV}_application.tfvars
+        
+        # Apply application configuration
+        terraform plan -var-file="${ENV}_application.tfvars" -out=app-tfplan
+        terraform apply -auto-approve app-tfplan
+        
+    - name: Get Application URL
+      run: |
+        ALB_DNS=$(terraform output -raw alb_dns_name)
+        echo "## 🚀 POC Application Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Application URL: http://$ALB_DNS" >> $GITHUB_STEP_SUMMARY
+        echo "### Environment: ${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+        echo "### Deployed by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "### Timestamp: $(date)" >> $GITHUB_STEP_SUMMARY
