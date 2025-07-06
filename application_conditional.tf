@@ -7,8 +7,8 @@ module "application_conditional" {
   count  = var.deploy_application ? 1 : 0
 
   # ECS Configuration
-  cluster_id   = data.aws_ecs_cluster.main[0].id
-  cluster_name = data.aws_ecs_cluster.main[0].cluster_name
+  cluster_id   = module.ecs.cluster_id
+  cluster_name = module.ecs.cluster_name
 
   # Application Configuration
   app_name              = var.app_name
@@ -23,12 +23,12 @@ module "application_conditional" {
   secrets               = var.app_secrets
 
   # Networking - Free Tier Optimized (use public subnets)
-  vpc_id             = data.aws_vpc.main[0].id
-  private_subnet_ids = data.aws_subnets.public[0].ids  # Use public subnets to avoid NAT Gateway costs
-  security_group_ids = [data.aws_security_group.ecs[0].id]
+  vpc_id             = local.vpc_id
+  private_subnet_ids = local.public_subnet_ids  # Use public subnets to avoid NAT Gateway costs
+  security_group_ids = [local.ecs_security_group_id]
 
   # Load Balancer Integration
-  alb_listener_arn                 = data.aws_lb_listener.main[0].arn
+  alb_listener_arn                 = local.alb_listener_arn
   health_check_path                = var.health_check_path
   health_check_interval            = var.health_check_interval
   health_check_timeout             = var.health_check_timeout
