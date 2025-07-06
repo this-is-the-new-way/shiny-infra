@@ -52,50 +52,6 @@ module "application_conditional" {
 }
 
 # Data sources for application resources (only when deploying application)
-data "aws_ecs_cluster" "main" {
-  count        = var.deploy_application ? 1 : 0
-  cluster_name = "${var.project_name}-${var.environment}"
-}
-
-data "aws_vpc" "main" {
-  count = var.deploy_application ? 1 : 0
-  tags = {
-    Name = "${var.project_name}-${var.environment}-vpc"
-  }
-}
-
-data "aws_subnets" "public" {
-  count = var.deploy_application ? 1 : 0
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.main[0].id]
-  }
-  
-  tags = {
-    Name = "*public*"
-  }
-}
-
-data "aws_security_group" "ecs" {
-  count = var.deploy_application ? 1 : 0
-  tags = {
-    Name = "${var.project_name}-${var.environment}-ecs-sg"
-  }
-}
-
-data "aws_lb_listener" "main" {
-  count             = var.deploy_application ? 1 : 0
-  load_balancer_arn = data.aws_lb.main[0].arn
-  port              = 80
-}
-
-data "aws_lb" "main" {
-  count = var.deploy_application ? 1 : 0
-  tags = {
-    Name = "${var.project_name}-${var.environment}-alb"
-  }
-}
-
 # Local values for application configuration
 locals {
   app_name_prefix = var.deploy_application ? "${var.project_name}-${var.environment}" : ""
