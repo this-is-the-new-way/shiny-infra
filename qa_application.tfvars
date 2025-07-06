@@ -5,6 +5,9 @@ environment  = "qa"
 project_name = "base-infra"
 aws_region   = "us-east-1"  # Use us-east-1 for better free tier availability
 
+# Application deployment flag - TRUE for application deployment
+deploy_application = true
+
 # ECS Configuration - Free Tier Optimized
 ecs_cluster_name       = "base-infra-qa"
 ecs_capacity_providers = ["FARGATE"]  # Use only FARGATE for simplicity

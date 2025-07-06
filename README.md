@@ -2,6 +2,15 @@
 
 A containerized web application deployment on AWS ECS with Terraform, supporting multiple environments (dev, qa, prod) with modern responsive design.
 
+## 🔄 Important: ECS Service Separation
+
+**NEW**: This infrastructure now implements a **two-phase deployment pattern** to prevent ECS service deletion/recreation cycles:
+
+1. **Base Infrastructure Phase**: VPC, ALB, ECS Cluster, Security Groups (using `*_environment.tfvars`)
+2. **Application Phase**: ECS Service, Task Definition, Auto-scaling (using `*_environment_application.tfvars`)
+
+This ensures that base infrastructure changes don't disrupt running applications. See [ECS_SERVICE_SEPARATION.md](./ECS_SERVICE_SEPARATION.md) for detailed implementation.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -124,6 +133,45 @@ Configured for AWS Free Tier:
 - Legacy QA-specific workflow
 - Superseded by the unified multi-environment workflow
 - Kept for backward compatibility
+
+## 🚀 Deployment Options
+
+The GitHub workflow now supports **four deployment modes** for maximum flexibility:
+
+### 1. **Full Deployment** (Recommended for new environments)
+```bash
+Action: deploy
+```
+- Deploys base infrastructure (VPC, ALB, ECS Cluster)
+- Builds and deploys application (ECS Service, Task Definition)
+- Complete end-to-end setup
+
+### 2. **Infrastructure Only** (Safe for existing environments)
+```bash
+Action: deploy-infra-only
+```
+- Updates base infrastructure only
+- Leaves running applications untouched
+- Prevents service disruption during infrastructure changes
+
+### 3. **Application Only** (Fast iterations)
+```bash
+Action: deploy-app-only
+```
+- Updates application components only
+- Builds new Docker image and updates ECS service
+- Zero downtime rolling deployment
+- Keeps infrastructure unchanged
+
+### 4. **Complete Cleanup**
+```bash
+Action: destroy
+```
+- Destroys application resources first
+- Then destroys base infrastructure
+- Proper dependency management
+
+See [GITHUB_WORKFLOW_UPDATES.md](./GITHUB_WORKFLOW_UPDATES.md) for detailed workflow documentation.
 
 ## 🛠️ Manual Deployment
 

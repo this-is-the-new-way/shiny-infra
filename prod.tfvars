@@ -5,6 +5,9 @@ environment  = "prod"
 project_name = "base-infra"
 aws_region   = "us-east-1"  # Use us-east-1 for better availability
 
+# Application deployment flag - FALSE for base infrastructure
+deploy_application = false
+
 # VPC Configuration - Production Optimized
 vpc_cidr                    = "10.2.0.0/16"  # Different CIDR for Production
 public_subnet_cidrs         = ["10.2.1.0/24", "10.2.2.0/24"]

@@ -5,6 +5,9 @@ aws_region  = "us-east-1"  # Use us-east-1 for better free tier availability
 # Project configuration
 project_name = "base-infra"
 
+# Application deployment flag - FALSE for base infrastructure
+deploy_application = false
+
 # Network configuration - Free Tier Optimized
 vpc_cidr             = "10.0.0.0/16"
 availability_zones   = ["us-east-1a", "us-east-1b"]  # Updated for us-east-1

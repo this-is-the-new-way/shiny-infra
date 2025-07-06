@@ -1,9 +1,12 @@
-# Development Environment Configuration
+# Development Environment Configuration - APPLICATION DEPLOYMENT
 
 # General Configuration - Free Tier Optimized
 environment  = "dev"
 project_name = "base-infra"
 aws_region   = "us-east-1"  # Use us-east-1 for better free tier availability
+
+# Application deployment flag - TRUE for application deployment
+deploy_application = true
 
 # ECS Configuration - Free Tier Optimized
 ecs_cluster_name       = "base-infra-dev"
@@ -48,6 +51,21 @@ health_check_unhealthy_threshold = 2
 
 # Auto Scaling Configuration - Disabled for Free Tier
 enable_auto_scaling              = false  # Disable to save costs
+auto_scaling_target_cpu          = 70
+auto_scaling_target_memory       = 80
+auto_scaling_scale_up_cooldown   = 300
+auto_scaling_scale_down_cooldown = 300
+
+# Logging Configuration - Free Tier Optimized
+log_retention_days = 1  # Minimum retention to save costs
+
+# Additional tags
+additional_tags = {
+  Owner       = "development-team"
+  Environment = "development"
+  Purpose     = "testing"
+  Component   = "application"
+}
 auto_scaling_target_cpu          = 70
 auto_scaling_target_memory       = 80
 auto_scaling_scale_up_cooldown   = 300

@@ -5,6 +5,9 @@ environment  = "qa"
 project_name = "base-infra"
 aws_region   = "us-east-1"  # Use us-east-1 for better free tier availability
 
+# Application deployment flag - FALSE for base infrastructure
+deploy_application = false
+
 # VPC Configuration - Free Tier Optimized
 vpc_cidr                    = "10.1.0.0/16"  # Different CIDR for QA
 public_subnet_cidrs         = ["10.1.1.0/24", "10.1.2.0/24"]

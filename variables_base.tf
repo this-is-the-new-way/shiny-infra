@@ -1,12 +1,6 @@
 # Base Infrastructure Variables
 # These variables are used during the base infrastructure deployment phase
 
-variable "deploy_application" {
-  description = "Whether to deploy the application resources (ECS service, task definition, etc.)"
-  type        = bool
-  default     = false
-}
-
 variable "aws_region" {
   description = "AWS region for resources"
   type        = string
@@ -207,5 +201,3 @@ variable "notification_topic_arn" {
   type        = string
   default     = null
 }
-
-
