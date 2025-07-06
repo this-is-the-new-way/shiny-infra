@@ -1,74 +1,74 @@
 # Base Infrastructure Outputs
 
-# VPC Outputs
+# VPC Outputs - Only available during base infrastructure deployment
 output "vpc_id" {
   description = "ID of the VPC"
-  value       = module.vpc.vpc_id
+  value       = var.deploy_application ? null : module.vpc[0].vpc_id
 }
 
 output "vpc_cidr_block" {
   description = "CIDR block of the VPC"
-  value       = module.vpc.vpc_cidr_block
+  value       = var.deploy_application ? null : module.vpc[0].vpc_cidr_block
 }
 
 output "public_subnet_ids" {
   description = "IDs of the public subnets"
-  value       = module.vpc.public_subnet_ids
+  value       = var.deploy_application ? null : module.vpc[0].public_subnet_ids
 }
 
 output "private_subnet_ids" {
   description = "IDs of the private subnets"
-  value       = module.vpc.private_subnet_ids
+  value       = var.deploy_application ? null : module.vpc[0].private_subnet_ids
 }
 
 output "internet_gateway_id" {
   description = "ID of the Internet Gateway"
-  value       = module.vpc.internet_gateway_id
+  value       = var.deploy_application ? null : module.vpc[0].internet_gateway_id
 }
 
 output "nat_gateway_ids" {
   description = "IDs of the NAT Gateways"
-  value       = module.vpc.nat_gateway_ids
+  value       = var.deploy_application ? null : module.vpc[0].nat_gateway_ids
 }
 
-# Security Group Outputs
+# Security Group Outputs - Only available during base infrastructure deployment
 output "alb_security_group_id" {
   description = "ID of the ALB security group"
-  value       = module.security.alb_security_group_id
+  value       = var.deploy_application ? null : module.security[0].alb_security_group_id
 }
 
 output "ecs_security_group_id" {
   description = "ID of the ECS security group"
-  value       = module.security.app_security_group_id
+  value       = var.deploy_application ? null : module.security[0].app_security_group_id
 }
 
-# Application Load Balancer Outputs
+# Application Load Balancer Outputs - Only available during base infrastructure deployment
 output "alb_arn" {
   description = "ARN of the Application Load Balancer"
-  value       = module.alb.alb_arn
+  value       = var.deploy_application ? null : module.alb[0].alb_arn
 }
 
 output "alb_dns_name" {
   description = "DNS name of the Application Load Balancer"
-  value       = module.alb.alb_dns_name
+  value       = var.deploy_application ? null : module.alb[0].alb_dns_name
 }
 
 output "alb_zone_id" {
   description = "Hosted zone ID of the Application Load Balancer"
-  value       = module.alb.alb_zone_id
+  value       = var.deploy_application ? null : module.alb[0].alb_zone_id
 }
 
 output "alb_listener_arn" {
   description = "ARN of the ALB listener"
-  value       = module.alb.alb_listener_arn
+  value       = var.deploy_application ? null : module.alb[0].alb_listener_arn
 }
 
 output "alb_target_group_arn" {
   description = "ARN of the ALB target group"
-  value       = module.alb.target_group_arn
+  value       = var.deploy_application ? null : module.alb[0].target_group_arn
 }
 
-# Environment Information
+# Environment Information - Always available
 output "environment" {
   description = "Environment name"
   value       = var.environment

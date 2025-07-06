@@ -3,8 +3,9 @@ locals {
   cluster_name = var.ecs_cluster_name != null ? var.ecs_cluster_name : "${var.project_name}-${var.environment}"
 }
 
-# ECS Cluster Module
+# ECS Cluster Module - Only create during base infrastructure deployment
 module "ecs" {
+  count  = var.deploy_application ? 0 : 1
   source = "./modules/ecs"
 
   cluster_name                       = local.cluster_name

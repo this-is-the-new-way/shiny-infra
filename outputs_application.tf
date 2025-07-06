@@ -1,17 +1,17 @@
-# ECS Cluster outputs
+# ECS Cluster outputs - Only available during base infrastructure deployment
 output "ecs_cluster_id" {
   description = "ID of the ECS cluster"
-  value       = module.ecs.cluster_id
+  value       = var.deploy_application ? null : module.ecs[0].cluster_id
 }
 
 output "ecs_cluster_arn" {
   description = "ARN of the ECS cluster"
-  value       = module.ecs.cluster_arn
+  value       = var.deploy_application ? null : module.ecs[0].cluster_arn
 }
 
 output "ecs_cluster_name" {
   description = "Name of the ECS cluster"
-  value       = module.ecs.cluster_name
+  value       = var.deploy_application ? null : module.ecs[0].cluster_name
 }
 
 # ECS Service outputs

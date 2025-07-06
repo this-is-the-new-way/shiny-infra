@@ -6,9 +6,9 @@ module "application_conditional" {
   source = "./modules/application"
   count  = var.deploy_application ? 1 : 0
 
-  # ECS Configuration
-  cluster_id   = module.ecs.cluster_id
-  cluster_name = module.ecs.cluster_name
+  # ECS Configuration - Use data source to find existing cluster
+  cluster_id   = data.aws_ecs_cluster.main[0].id
+  cluster_name = data.aws_ecs_cluster.main[0].cluster_name
 
   # Application Configuration
   app_name              = var.app_name

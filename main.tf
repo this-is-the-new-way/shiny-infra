@@ -8,8 +8,9 @@ locals {
   }, var.additional_tags)
 }
 
-# VPC Module
+# VPC Module - Only create during base infrastructure deployment
 module "vpc" {
+  count  = var.deploy_application ? 0 : 1
   source = "./modules/vpc"
 
   name_prefix          = local.name_prefix
@@ -27,25 +28,27 @@ module "vpc" {
   tags = local.common_tags
 }
 
-# Security Groups Module
+# Security Groups Module - Only create during base infrastructure deployment
 module "security" {
+  count  = var.deploy_application ? 0 : 1
   source = "./modules/security"
 
   name_prefix = local.name_prefix
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = var.deploy_application ? null : module.vpc[0].vpc_id
   vpc_cidr    = var.vpc_cidr
 
   tags = local.common_tags
 }
 
-# Application Load Balancer Module
+# Application Load Balancer Module - Only create during base infrastructure deployment
 module "alb" {
+  count  = var.deploy_application ? 0 : 1
   source = "./modules/alb"
 
   name_prefix        = local.name_prefix
-  vpc_id             = module.vpc.vpc_id
-  public_subnet_ids  = module.vpc.public_subnet_ids
-  security_group_ids = [module.security.alb_security_group_id]
+  vpc_id             = var.deploy_application ? null : module.vpc[0].vpc_id
+  public_subnet_ids  = var.deploy_application ? null : module.vpc[0].public_subnet_ids
+  security_group_ids = var.deploy_application ? null : [module.security[0].alb_security_group_id]
 
   internal                         = var.alb_internal
   deletion_protection              = var.alb_deletion_protection
