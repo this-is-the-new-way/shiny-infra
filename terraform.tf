@@ -10,9 +10,10 @@ terraform {
   }
 
   # Configure S3 backend for shared state
+  # Note: The key will be overridden by -backend-config during initialization
   backend "s3" {
     bucket         = "terrastate-file"
-    key            = "shiny-infra/terraform.tfstate"
+    key            = "shiny-infra/dev/terraform.tfstate"  # Default to dev, will be overridden
     region         = "us-east-1"
   }
   #   encrypt        = true

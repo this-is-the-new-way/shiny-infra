@@ -66,7 +66,10 @@ jobs:
         fi
         
     - name: Initialize Terraform
-      run: terraform init
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "Initializing Terraform for environment: $ENV"
+        terraform init -backend-config="backend-${ENV}.hcl"
       
     - name: Validate Terraform
       run: terraform validate
@@ -119,7 +122,10 @@ jobs:
         fi
         
     - name: Initialize Terraform
-      run: terraform init
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "Initializing Terraform for environment: $ENV"
+        terraform init -backend-config="backend-${ENV}.hcl"
       
     - name: Get ECR Repository URL
       id: ecr-url
@@ -229,7 +235,10 @@ jobs:
         fi
         
     - name: Initialize Terraform
-      run: terraform init
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "Initializing Terraform for environment: $ENV"
+        terraform init -backend-config="backend-${ENV}.hcl"
       
     - name: Destroy Application
       run: |
