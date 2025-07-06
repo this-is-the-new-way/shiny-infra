@@ -173,7 +173,7 @@ resource "aws_ecs_task_definition" "app" {
 
 # ALB Target Group
 resource "aws_lb_target_group" "app" {
-  name        = "${local.service_name}-tg"
+  name        = "${local.service_name}-app-tg"
   port        = var.app_port
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
