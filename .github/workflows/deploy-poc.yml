@@ -1,8 +1,8 @@
-name: Deploy POC Infrastructure
+name: Deploy Multi-Environment Infrastructure
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, qa, prod ]
   workflow_dispatch:
     inputs:
       environment:
@@ -12,8 +12,16 @@ on:
         type: choice
         options:
         - dev
-        - staging
+        - qa
         - prod
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+        - deploy
+        - destroy
 
 env:
   AWS_REGION: us-east-1
@@ -24,7 +32,7 @@ jobs:
   deploy-infrastructure:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'dev' }}
+    if: github.event.inputs.action != 'destroy'
     
     steps:
     - name: Checkout code
@@ -42,6 +50,21 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
         
+    - name: Determine Environment
+      id: env
+      run: |
+        if [ "${{ github.event.inputs.environment }}" != "" ]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/qa" ]; then
+          echo "environment=qa" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/prod" ]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+        else
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        fi
+        
     - name: Initialize Terraform
       run: terraform init
       
@@ -50,7 +73,8 @@ jobs:
       
     - name: Plan Infrastructure
       run: |
-        ENV=${{ github.event.inputs.environment || 'dev' }}
+        ENV=${{ steps.env.outputs.environment }}
+        echo "Deploying to environment: $ENV"
         terraform plan -var-file="${ENV}.tfvars" -out=tfplan
         
     - name: Apply Infrastructure
@@ -61,7 +85,7 @@ jobs:
     name: Build and Deploy Application
     runs-on: ubuntu-latest
     needs: deploy-infrastructure
-    environment: ${{ github.event.inputs.environment || 'dev' }}
+    if: github.event.inputs.action != 'destroy'
     
     steps:
     - name: Checkout code
@@ -78,6 +102,21 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Determine Environment
+      id: env
+      run: |
+        if [ "${{ github.event.inputs.environment }}" != "" ]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/qa" ]; then
+          echo "environment=qa" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/prod" ]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+        else
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        fi
         
     - name: Initialize Terraform
       run: terraform init
@@ -95,30 +134,130 @@ jobs:
     - name: Build Docker image
       run: |
         cd docker
-        docker build -t poc-app:latest .
-        docker tag poc-app:latest ${{ steps.ecr-url.outputs.ecr_url }}:latest
+        ENV=${{ steps.env.outputs.environment }}
+        docker build -t base-infra:$ENV .
+        docker tag base-infra:$ENV ${{ steps.ecr-url.outputs.ecr_url }}:$ENV
+        docker tag base-infra:$ENV ${{ steps.ecr-url.outputs.ecr_url }}:latest
         
     - name: Push Docker image
       run: |
+        ENV=${{ steps.env.outputs.environment }}
+        docker push ${{ steps.ecr-url.outputs.ecr_url }}:$ENV
         docker push ${{ steps.ecr-url.outputs.ecr_url }}:latest
         
     - name: Deploy Application
       run: |
-        ENV=${{ github.event.inputs.environment || 'dev' }}
+        ENV=${{ steps.env.outputs.environment }}
         
         # Update app_image in tfvars
-        sed -i "s|app_image.*|app_image = \"${{ steps.ecr-url.outputs.ecr_url }}:latest\"|g" ${ENV}_application.tfvars
+        sed -i "s|app_image.*|app_image = \"${{ steps.ecr-url.outputs.ecr_url }}:$ENV\"|g" ${ENV}_application.tfvars
         
         # Apply application configuration
         terraform plan -var-file="${ENV}_application.tfvars" -out=app-tfplan
         terraform apply -auto-approve app-tfplan
         
+    - name: Wait for Service Stability
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        CLUSTER_NAME="base-infra-$ENV"
+        SERVICE_NAME="base-infra-$ENV"
+        
+        echo "Waiting for service $SERVICE_NAME in cluster $CLUSTER_NAME to be stable..."
+        aws ecs wait services-stable --cluster $CLUSTER_NAME --services $SERVICE_NAME --timeout 600 || echo "Service may still be starting"
+        
     - name: Get Application URL
       run: |
+        ENV=${{ steps.env.outputs.environment }}
         ALB_DNS=$(terraform output -raw alb_dns_name)
-        echo "## 🚀 POC Application Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "## 🚀 $ENV Environment Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Application URL: http://$ALB_DNS" >> $GITHUB_STEP_SUMMARY
-        echo "### Environment: ${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+        echo "### Health Check: http://$ALB_DNS/health" >> $GITHUB_STEP_SUMMARY
+        echo "### Environment: $ENV" >> $GITHUB_STEP_SUMMARY
         echo "### Deployed by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
         echo "### Timestamp: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "$ENV" == "prod" ]; then
+          echo "### 🔥 Production Deployment Notes:" >> $GITHUB_STEP_SUMMARY
+          echo "- High availability with 2+ instances" >> $GITHUB_STEP_SUMMARY
+          echo "- Auto-scaling enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- Enhanced monitoring active" >> $GITHUB_STEP_SUMMARY
+          echo "- Deletion protection enabled" >> $GITHUB_STEP_SUMMARY
+        elif [ "$ENV" == "qa" ]; then
+          echo "### 🔍 QA Testing Notes:" >> $GITHUB_STEP_SUMMARY
+          echo "- Test the application functionality" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify health check endpoint" >> $GITHUB_STEP_SUMMARY
+          echo "- Check responsive design" >> $GITHUB_STEP_SUMMARY
+          echo "- Validate navigation between pages" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### 🛠️ Development Notes:" >> $GITHUB_STEP_SUMMARY
+          echo "- Development environment ready" >> $GITHUB_STEP_SUMMARY
+          echo "- Test new features here" >> $GITHUB_STEP_SUMMARY
+          echo "- Debug and iterate quickly" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  # Job 3: Destroy Environment
+  destroy-environment:
+    name: Destroy Environment
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Determine Environment
+      id: env
+      run: |
+        if [ "${{ github.event.inputs.environment }}" != "" ]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+        else
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Initialize Terraform
+      run: terraform init
+      
+    - name: Destroy Application
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "Destroying $ENV application..."
+        terraform plan -var-file="${ENV}_application.tfvars" -destroy -out=app-destroy-plan
+        terraform apply -auto-approve app-destroy-plan
+        
+    - name: Destroy Infrastructure
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "Destroying $ENV infrastructure..."
+        terraform plan -var-file="${ENV}.tfvars" -destroy -out=destroy-plan
+        terraform apply -auto-approve destroy-plan
+        
+    - name: Summary
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "## 🗑️ $ENV Environment Destroyed Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Environment: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "### Destroyed by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "### Timestamp: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Resources Destroyed:" >> $GITHUB_STEP_SUMMARY
+        echo "- ECS Cluster: base-infra-$ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- Application Load Balancer" >> $GITHUB_STEP_SUMMARY
+        echo "- VPC and associated resources" >> $GITHUB_STEP_SUMMARY
+        echo "- Security Groups" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Note:** ECR repository is shared across environments and was not destroyed" >> $GITHUB_STEP_SUMMARY

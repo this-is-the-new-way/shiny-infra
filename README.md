@@ -1,6 +1,6 @@
-# Shiny Infrastructure - POC Web Application
+# Shiny Infrastructure - Multi-Environment POC Web Application
 
-A simple POC (Proof of Concept) project for deploying a containerized web application on AWS ECS with Terraform.
+A containerized web application deployment on AWS ECS with Terraform, supporting multiple environments (dev, qa, prod) with modern responsive design.
 
 ## 🚀 Quick Start
 
@@ -18,7 +18,9 @@ A simple POC (Proof of Concept) project for deploying a containerized web applic
 
 2. **Deploy**:
    - Push to `main` branch OR
-   - Use GitHub Actions "Deploy POC Infrastructure" workflow
+   - Use GitHub Actions workflow "Deploy Multi-Environment Infrastructure":
+     - Select environment: **dev**, **qa**, or **prod**
+     - Select action: **deploy** or **destroy**
 
 3. **Access**:
    - Check workflow summary for application URL
@@ -26,15 +28,33 @@ A simple POC (Proof of Concept) project for deploying a containerized web applic
 
 ### Cleanup
 
-Use GitHub Actions "Destroy POC Infrastructure" workflow:
-- Type `DESTROY` to confirm
-- All resources will be permanently deleted
+Use GitHub Actions workflow "Deploy Multi-Environment Infrastructure":
+- Select environment: **dev**, **qa**, or **prod**
+- Select action: **destroy**
+
+## 🌟 Features
+
+- **Multi-Environment Support**: Dev, QA, and Production environments with isolated resources
+- **Modern UI**: Beautiful glassmorphism design with responsive layout
+- **Container Orchestration**: ECS Fargate with health checks and auto-scaling
+- **Infrastructure as Code**: Complete Terraform automation
+- **CI/CD Ready**: Unified GitHub Actions workflow for all environments
+- **Cost Optimized**: AWS Free Tier friendly configuration for dev/qa
+- **Production Ready**: High availability and auto-scaling for production
 
 ## 🏗️ Architecture
 
 ```
 Internet → ALB → ECS Service (Fargate) → Nginx Container
+                    ↓
+            CloudWatch Logs & Monitoring
 ```
+
+### Multi-Environment Setup
+- **Dev Environment**: `base-infra-dev` cluster with VPC `10.0.0.0/16`
+- **QA Environment**: `base-infra-qa` cluster with VPC `10.1.0.0/16`
+- **Production Environment**: `base-infra-prod` cluster with VPC `10.2.0.0/16`
+- **Shared Resources**: ECR repository for Docker images
 
 ## 📁 Project Structure
 
@@ -43,26 +63,30 @@ shiny-infra/
 ├── main.tf                    # Main Terraform configuration
 ├── variables.tf               # Input variables
 ├── dev.tfvars                 # Development environment
-├── dev_application.tfvars     # Application configuration
+├── qa.tfvars                  # QA environment
+├── prod.tfvars                # Production environment
+├── dev_application.tfvars     # Development application configuration
+├── qa_application.tfvars      # QA application configuration
+├── prod_application.tfvars    # Production application configuration
 ├── docker/
 │   ├── Dockerfile            # Container image
 │   ├── nginx.conf            # Web server config
 │   └── src/                  # Static web content
 ├── .github/workflows/
-│   ├── deploy-poc.yml        # Deployment automation
-│   ├── destroy-infrastructure.yml # Cleanup automation
-│   └── pr-validation.yml     # PR validation
+│   ├── deploy-poc.yml        # Multi-environment deployment
+│   ├── deploy-qa.yml         # QA-specific deployment
+│   └── destroy-infrastructure.yml # Cleanup automation
 └── modules/                   # Terraform modules
 ```
 
 ## 🔧 Configuration
 
-### Environment Variables (dev.tfvars)
+### Environment Variables (dev.tfvars, qa.tfvars)
 - `aws_region`: AWS region (default: us-east-1)
 - `environment`: Environment name (dev/staging/prod)
 - `project_name`: Project identifier
 
-### Application Variables (dev_application.tfvars)
+### Application Variables (dev_application.tfvars, qa_application.tfvars)
 - `app_name`: Application name
 - `app_image`: Docker image URL (auto-updated)
 - `app_port`: Container port (80)
@@ -84,19 +108,22 @@ Configured for AWS Free Tier:
 
 ## 🚀 GitHub Actions Workflows
 
-### 1. **Deploy POC Infrastructure** (`.github/workflows/deploy-poc.yml`)
-- Builds and deploys infrastructure and application
-- Automatically triggered on push to main/develop
-- Manual trigger available
+### 1. **Deploy Multi-Environment Infrastructure** (`.github/workflows/deploy-poc.yml`)
+- Unified workflow for all environments (dev, qa, prod)
+- Supports both deployment and destruction
+- Environment selection via workflow input
+- Automatically triggered on push to main/develop/qa/prod branches
+- Manual trigger available with environment selection
 
-### 2. **Destroy POC Infrastructure** (`.github/workflows/destroy-infrastructure.yml`)
-- Safely destroys all AWS resources
+### 2. **Destroy Infrastructure** (`.github/workflows/destroy-infrastructure.yml`)
+- Legacy workflow for dev environment destruction
 - Requires `DESTROY` confirmation
 - Manual trigger only
 
-### 3. **PR Validation** (`.github/workflows/pr-validation.yml`)
-- Validates Terraform code on pull requests
-- Checks formatting and syntax
+### 3. **Deploy QA Environment** (`.github/workflows/deploy-qa.yml`)
+- Legacy QA-specific workflow
+- Superseded by the unified multi-environment workflow
+- Kept for backward compatibility
 
 ## 🛠️ Manual Deployment
 
@@ -122,6 +149,95 @@ terraform plan -var-file="dev_application.tfvars"
 terraform apply -var-file="dev_application.tfvars"
 ```
 
+## 🚀 Deployment Options
+
+### Option 1: GitHub Actions (Recommended)
+1. **Deploy Dev Environment**:
+   - Use "Deploy POC Infrastructure" workflow
+   - Select `dev` environment
+   - Auto-deploys on push to `main` branch
+
+2. **Deploy QA Environment**:
+   - Use "Deploy Multi-Environment Infrastructure" workflow
+   - Select `qa` environment
+   - Auto-deploys on push to `qa` branch
+
+3. **Deploy Production Environment**:
+   - Use "Deploy Multi-Environment Infrastructure" workflow
+   - Select `prod` environment and `deploy` action
+   - Requires manual confirmation for safety
+
+### Option 2: Quick Deployment Script
+```bash
+# Interactive deployment (Linux/macOS)
+./scripts/quick-env-deploy.sh
+
+# Direct deployment (Linux/macOS)
+./scripts/quick-env-deploy.sh dev deploy
+./scripts/quick-env-deploy.sh qa deploy
+./scripts/quick-env-deploy.sh prod deploy
+
+# Windows
+.\scripts\quick-env-deploy.bat
+.\scripts\quick-env-deploy.bat dev deploy
+.\scripts\quick-env-deploy.bat qa deploy
+.\scripts\quick-env-deploy.bat prod deploy
+```
+
+### Option 3: Environment-Specific Scripts
+```bash
+# Deploy dev environment
+./scripts/deploy-complete.sh
+
+# Deploy QA environment
+./scripts/deploy-qa.sh
+
+# Deploy Production environment
+./scripts/deploy-prod.sh
+
+# Environment management
+./scripts/manage-envs.sh deploy dev
+./scripts/manage-envs.sh deploy qa
+./scripts/manage-envs.sh deploy prod
+./scripts/manage-envs.sh status dev
+./scripts/manage-envs.sh list
+```
+
+### Option 4: Manual Terraform
+```bash
+# Dev environment
+terraform init
+terraform plan -var-file="dev.tfvars" -out=dev-plan
+terraform apply dev-plan
+
+# QA environment
+terraform plan -var-file="qa.tfvars" -out=qa-plan
+terraform apply qa-plan
+
+# Production environment
+terraform plan -var-file="prod.tfvars" -out=prod-plan
+terraform apply prod-plan
+```
+
+## 🔄 Environment Management
+
+### Environment Comparison
+| Feature | Dev | QA | Prod |
+|---------|-----|----|----- |
+| Status | ✅ Active | ✅ Active | ✅ Active |
+| Cluster | base-infra-dev | base-infra-qa | base-infra-prod |
+| VPC CIDR | 10.0.0.0/16 | 10.1.0.0/16 | 10.2.0.0/16 |
+| Purpose | Development | QA Testing | Production |
+| Resources | Minimal | Minimal | High Availability |
+| CPU/Memory | 0.25 vCPU / 0.5 GB | 0.25 vCPU / 0.5 GB | 0.5 vCPU / 1 GB |
+| Instances | 1 | 1 | 2+ (Auto-scaling) |
+| Cost | Free Tier | Free Tier | Production Cost |
+
+### Environment Lifecycle
+1. **Development**: Code changes → Dev environment
+2. **Quality Assurance**: Stable code → QA environment
+3. **Production**: Approved releases → Production environment
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -145,8 +261,10 @@ aws elbv2 describe-target-health --target-group-arn <target-group-arn>
 
 ## 📚 Documentation
 
-- [POC Setup Guide](POC_SETUP.md) - Detailed setup instructions
-- [Infrastructure Destruction Guide](INFRASTRUCTURE_DESTRUCTION_GUIDE.md) - Cleanup procedures
+- **[Multi-Environment Deployment Guide](MULTI_ENVIRONMENT_GUIDE.md)** - Complete guide for managing all environments
+- **[POC Setup Guide](POC_SETUP.md)** - Detailed setup instructions
+- **[Infrastructure Destruction Guide](INFRASTRUCTURE_DESTRUCTION_GUIDE.md)** - Cleanup procedures
+- **[QA Environment Integration](QA_ENVIRONMENT_INTEGRATION.md)** - QA-specific documentation
 
 ## 🎯 POC Goals
 
@@ -155,8 +273,11 @@ This project demonstrates:
 - ✅ Infrastructure as Code with Terraform
 - ✅ CI/CD with GitHub Actions
 - ✅ AWS ECS with Fargate
+- ✅ Multi-environment support (dev, qa, prod)
 - ✅ Cost-optimized architecture
 - ✅ Automated destruction for cleanup
+- ✅ Unified deployment workflows
+- ✅ Environment-specific configurations
 
 ## 🤝 Contributing
 
