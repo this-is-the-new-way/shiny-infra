@@ -1,39 +1,39 @@
-# ECS Cluster outputs - Only available during base infrastructure deployment
+# ECS Cluster outputs - Available when base infrastructure is deployed
 output "ecs_cluster_id" {
   description = "ID of the ECS cluster"
-  value       = var.deploy_application ? null : module.ecs[0].cluster_id
+  value       = var.deploy_base_infrastructure ? module.ecs[0].cluster_id : null
 }
 
 output "ecs_cluster_arn" {
   description = "ARN of the ECS cluster"
-  value       = var.deploy_application ? null : module.ecs[0].cluster_arn
+  value       = var.deploy_base_infrastructure ? module.ecs[0].cluster_arn : null
 }
 
 output "ecs_cluster_name" {
   description = "Name of the ECS cluster"
-  value       = var.deploy_application ? null : module.ecs[0].cluster_name
+  value       = var.deploy_base_infrastructure ? module.ecs[0].cluster_name : null
 }
 
 # ECS Service outputs
 output "ecs_service_name" {
   description = "Name of the ECS service"
-  value       = var.deploy_application ? module.application_conditional[0].service_name : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].service_name : null
 }
 
 output "ecs_service_arn" {
   description = "ARN of the ECS service"
-  value       = var.deploy_application ? module.application_conditional[0].service_arn : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].service_arn : null
 }
 
 output "ecs_task_definition_arn" {
   description = "ARN of the ECS task definition"
-  value       = var.deploy_application ? module.application_conditional[0].task_definition_arn : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].task_definition_arn : null
 }
 
 # Application Target Group (from application module)
 output "app_target_group_arn" {
   description = "ARN of the application-specific target group"
-  value       = var.deploy_application ? module.application_conditional[0].target_group_arn : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].target_group_arn : null
 }
 
 # Application URL
@@ -50,18 +50,18 @@ output "application_https_url" {
 # CloudWatch Log Group
 output "cloudwatch_log_group_name" {
   description = "Name of the CloudWatch log group for the application"
-  value       = var.deploy_application ? module.application_conditional[0].log_group_name : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].log_group_name : null
 }
 
 output "cloudwatch_log_group_arn" {
   description = "ARN of the CloudWatch log group for the application"
-  value       = var.deploy_application ? module.application_conditional[0].log_group_arn : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].log_group_arn : null
 }
 
 # Auto Scaling
 output "auto_scaling_target_arn" {
   description = "ARN of the auto scaling target"
-  value       = var.deploy_application ? module.application_conditional[0].auto_scaling_target_arn : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].auto_scaling_target_arn : null
 }
 
 # Monitoring
@@ -73,12 +73,12 @@ output "auto_scaling_target_arn" {
 # Security
 output "task_execution_role_arn" {
   description = "ARN of the ECS task execution role"
-  value       = var.deploy_application ? module.application_conditional[0].task_execution_role_arn : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].task_execution_role_arn : null
 }
 
 output "task_role_arn" {
   description = "ARN of the ECS task role"
-  value       = var.deploy_application ? module.application_conditional[0].task_role_arn : null
+  value       = var.deploy_base_infrastructure ? module.application_conditional[0].task_role_arn : null
 }
 
 # Base Infrastructure References

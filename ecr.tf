@@ -1,6 +1,6 @@
-# ECR Repository for the application - Only create during base infrastructure deployment
+# ECR Repository for the application - Create during base infrastructure deployment
 resource "aws_ecr_repository" "app" {
-  count                = var.deploy_application ? 0 : 1
+  count                = var.deploy_base_infrastructure ? 1 : 0
   name                 = "${var.project_name}-${var.environment}"
   image_tag_mutability = "MUTABLE"
   force_delete         = true  # Allow deletion even if repository contains images
@@ -14,7 +14,7 @@ resource "aws_ecr_repository" "app" {
 
 # ECR Lifecycle Policy to manage image retention
 resource "aws_ecr_lifecycle_policy" "app" {
-  count      = var.deploy_application ? 0 : 1
+  count      = var.deploy_base_infrastructure ? 1 : 0
   repository = aws_ecr_repository.app[0].name
 
   policy = jsonencode({
@@ -52,5 +52,5 @@ resource "aws_ecr_lifecycle_policy" "app" {
 # Output ECR repository URL for GitHub Actions
 output "ecr_repository_url" {
   description = "URL of the ECR repository"
-  value       = var.deploy_application ? null : aws_ecr_repository.app[0].repository_url
+  value       = var.deploy_base_infrastructure ? aws_ecr_repository.app[0].repository_url : null
 }

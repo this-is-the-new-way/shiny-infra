@@ -1,10 +1,10 @@
 # Base Infrastructure Variables
-# These variables are used during the base infrastructure deployment phase
+# These variables are used during the unified deployment
 
-variable "deploy_application" {
-  description = "Whether to deploy the application resources (ECS service, task definition, etc.)"
+variable "deploy_base_infrastructure" {
+  description = "Whether to deploy the base infrastructure resources (VPC, ALB, ECS cluster, etc.)"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "aws_region" {

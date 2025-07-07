@@ -1,4 +1,4 @@
-name: Deploy Multi-Environment Infrastructure (ECS Service Separation)
+name: Deploy Multi-Environment Infrastructure (Unified Deployment)
 
 on:
   push:
@@ -22,19 +22,17 @@ on:
         options:
         - deploy
         - destroy
-        - deploy-infra-only
-        - deploy-app-only
 
 env:
   AWS_REGION: us-east-1
   TERRAFORM_VERSION: 1.11.0
 
 jobs:
-  # Job 1: Deploy Base Infrastructure (VPC, ALB, ECS Cluster, Security Groups)
-  deploy-base-infrastructure:
-    name: Deploy Base Infrastructure
+  # Unified Deployment Job - Deploy both base infrastructure and application in one operation
+  deploy-unified:
+    name: Deploy Unified Infrastructure
     runs-on: ubuntu-latest
-    if: github.event.inputs.action != 'destroy' && github.event.inputs.action != 'deploy-app-only'
+    if: github.event.inputs.action != 'destroy'
     
     steps:
     - name: Checkout code
@@ -76,28 +74,27 @@ jobs:
     - name: Validate Terraform
       run: terraform validate
       
-    - name: Plan Base Infrastructure
+    - name: Plan Unified Infrastructure
       run: |
         ENV=${{ steps.env.outputs.environment }}
-        echo "📋 Planning BASE INFRASTRUCTURE for environment: $ENV"
-        echo "ℹ️  Using ${ENV}.tfvars (deploy_application = false)"
-        terraform plan -var-file="${ENV}.tfvars" -out=base-infra-plan
+        echo "📋 Planning UNIFIED INFRASTRUCTURE for environment: $ENV"
+        echo "ℹ️  Using ${ENV}.tfvars (deploy_base_infrastructure = true)"
+        terraform plan -var-file="${ENV}.tfvars" -out=unified-plan
         
-    - name: Apply Base Infrastructure
+    - name: Apply Unified Infrastructure
       run: |
         ENV=${{ steps.env.outputs.environment }}
-        echo "🚀 Applying BASE INFRASTRUCTURE for environment: $ENV"
-        echo "ℹ️  This will create: VPC, ALB, ECS Cluster, Security Groups, ECR"
-        echo "ℹ️  This will NOT create: ECS Service, Task Definition"
-        terraform apply -auto-approve base-infra-plan
+        echo "🚀 Applying UNIFIED INFRASTRUCTURE for environment: $ENV"
+        echo "ℹ️  This will create: VPC, ALB, ECS Cluster, Security Groups, ECR, ECS Service, Task Definition"
+        terraform apply -auto-approve unified-plan
         
-    - name: Base Infrastructure Summary
+    - name: Unified Infrastructure Summary
       run: |
         ENV=${{ steps.env.outputs.environment }}
-        echo "## 🏗️ Base Infrastructure Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "## 🏗️ Unified Infrastructure Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Environment: $ENV" >> $GITHUB_STEP_SUMMARY
-        echo "### Phase: Base Infrastructure Only" >> $GITHUB_STEP_SUMMARY
+        echo "### Phase: Unified Deployment (Base Infrastructure + Application)" >> $GITHUB_STEP_SUMMARY
         echo "### Resources Created:" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ VPC with public/private subnets" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ Application Load Balancer (ALB)" >> $GITHUB_STEP_SUMMARY
@@ -105,16 +102,17 @@ jobs:
         echo "- ✅ Security Groups" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ ECR Repository" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ CloudWatch Log Groups" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ ECS Service" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Task Definition" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Auto-scaling" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### ⚠️ Note: ECS Service NOT yet created" >> $GITHUB_STEP_SUMMARY
-        echo "The ECS service will be created in the next phase to avoid deletion/recreation cycles." >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Complete infrastructure deployed in a single operation!" >> $GITHUB_STEP_SUMMARY
 
-  # Job 2: Build and Deploy Application (ECS Service, Task Definition, Auto-scaling)
-  deploy-application:
-    name: Build and Deploy Application
+  # Destroy Infrastructure Job
+  destroy:
+    name: Destroy Infrastructure
     runs-on: ubuntu-latest
-    needs: deploy-base-infrastructure
-    if: github.event.inputs.action != 'destroy' && github.event.inputs.action != 'deploy-infra-only'
+    if: github.event.inputs.action == 'destroy'
     
     steps:
     - name: Checkout code

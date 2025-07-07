@@ -1,14 +1,14 @@
 # Conditional inclusion of application resources
-# This file is used to conditionally include application.tf based on a feature flag
+# This file is used to conditionally include application.tf based on the unified deployment flag
 
-# Only include application resources when deploy_application is true
+# Only include application resources when deploying base infrastructure (unified deployment)
 module "application_conditional" {
   source = "./modules/application"
-  count  = var.deploy_application ? 1 : 0
+  count  = var.deploy_base_infrastructure ? 1 : 0
 
-  # ECS Configuration - Use data source to find existing cluster
-  cluster_id   = data.aws_ecs_cluster.main[0].id
-  cluster_name = data.aws_ecs_cluster.main[0].cluster_name
+  # ECS Configuration - Use data source for app-only deployment, module outputs for unified deployment
+  cluster_id   = var.deploy_base_infrastructure ? module.ecs[0].cluster_id : data.aws_ecs_cluster.main[0].id
+  cluster_name = var.deploy_base_infrastructure ? module.ecs[0].cluster_name : data.aws_ecs_cluster.main[0].cluster_name
 
   # Application Configuration
   app_name              = var.app_name
@@ -51,12 +51,12 @@ module "application_conditional" {
   tags         = local.app_common_tags
 }
 
-# Data sources for application resources (only when deploying application)
+# Data sources for application resources (only when deploying unified infrastructure)
 # Local values for application configuration
 locals {
-  app_name_prefix = var.deploy_application ? "${var.project_name}-${var.environment}" : ""
+  app_name_prefix = var.deploy_base_infrastructure ? "${var.project_name}-${var.environment}" : ""
   
-  app_common_tags = var.deploy_application ? merge({
+  app_common_tags = var.deploy_base_infrastructure ? merge({
     Environment = var.environment
     Project     = var.project_name
     Component   = "application"
