@@ -308,4 +308,151 @@ variable "log_retention_days" {
   default     = 1  # Minimum retention to save costs
 }
 
+# Additional Variables for Complete Configuration
+
+# Security Configuration
+variable "allowed_cidr_blocks" {
+  description = "CIDR blocks allowed to access the ALB"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+# ALB Configuration
+variable "alb_name" {
+  description = "Name of the Application Load Balancer"
+  type        = string
+  default     = ""
+}
+
+variable "alb_type" {
+  description = "Type of the Application Load Balancer"
+  type        = string
+  default     = "application"
+}
+
+variable "alb_scheme" {
+  description = "ALB scheme (internet-facing or internal)"
+  type        = string
+  default     = "internet-facing"
+}
+
+variable "alb_ip_address_type" {
+  description = "IP address type for the ALB"
+  type        = string
+  default     = "ipv4"
+}
+
+variable "enable_deletion_protection" {
+  description = "Enable deletion protection for ALB"
+  type        = bool
+  default     = false
+}
+
+variable "enable_http2" {
+  description = "Enable HTTP/2 for ALB"
+  type        = bool
+  default     = true
+}
+
+variable "idle_timeout" {
+  description = "Idle timeout for ALB"
+  type        = number
+  default     = 60
+}
+
+variable "drop_invalid_header_fields" {
+  description = "Drop invalid header fields"
+  type        = bool
+  default     = true
+}
+
+# Target Group Configuration
+variable "target_group_name" {
+  description = "Name of the target group"
+  type        = string
+  default     = ""
+}
+
+variable "target_group_port" {
+  description = "Port for the target group"
+  type        = number
+  default     = 80
+}
+
+variable "target_group_protocol" {
+  description = "Protocol for the target group"
+  type        = string
+  default     = "HTTP"
+}
+
+variable "target_group_type" {
+  description = "Type of the target group"
+  type        = string
+  default     = "ip"
+}
+
+variable "health_check_protocol" {
+  description = "Protocol for health check"
+  type        = string
+  default     = "HTTP"
+}
+
+variable "health_check_port" {
+  description = "Port for health check"
+  type        = string
+  default     = "traffic-port"
+}
+
+# ECS Configuration
+variable "container_insights" {
+  description = "Enable container insights for ECS cluster"
+  type        = string
+  default     = "disabled"
+}
+
+# ECR Configuration
+variable "ecr_repository_name" {
+  description = "Name of the ECR repository"
+  type        = string
+  default     = ""
+}
+
+variable "ecr_image_tag_mutability" {
+  description = "Image tag mutability setting for ECR"
+  type        = string
+  default     = "MUTABLE"
+}
+
+variable "ecr_scan_on_push" {
+  description = "Enable image scanning on push"
+  type        = bool
+  default     = true
+}
+
+variable "ecr_encryption_type" {
+  description = "Encryption type for ECR"
+  type        = string
+  default     = "AES256"
+}
+
+variable "ecr_lifecycle_policy" {
+  description = "Lifecycle policy for ECR repository"
+  type        = any
+  default     = {}
+}
+
+# Common Tags
+variable "common_tags" {
+  description = "Common tags to be applied to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+# Backward compatibility variables
+variable "deploy_application" {
+  description = "Legacy variable for backward compatibility - use deploy_base_infrastructure instead"
+  type        = bool
+  default     = true
+}
+
 

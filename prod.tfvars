@@ -135,13 +135,6 @@ app_secrets = {
   # "API_KEY" = "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod-api-key"
 }
 
-# Health Check Configuration - Production Optimized
-health_check_path                = "/health"  # Use dedicated health endpoint
-health_check_interval            = 30
-health_check_timeout             = 10   # Longer timeout for production
-health_check_healthy_threshold   = 3    # More strict for production
-health_check_unhealthy_threshold = 2
-
 # Auto Scaling Configuration - Enabled for Production
 enable_auto_scaling              = true   # Enable for production
 auto_scaling_target_cpu          = 70

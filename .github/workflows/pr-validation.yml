@@ -1,0 +1,245 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [ prod ]
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - 'docker/**'
+      - '.github/workflows/**'
+  push:
+    branches: [ develop ]
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - 'docker/**'
+      - '.github/workflows/**'
+
+env:
+  TERRAFORM_VERSION: 1.11.0
+
+jobs:
+  validate:
+    name: Validate Terraform Configuration
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Initialize Terraform
+      run: |
+        echo "🔧 Initializing Terraform for validation..."
+        terraform init -backend=false
+      
+    - name: Validate Terraform
+      run: |
+        echo "✅ Validating Terraform configuration..."
+        terraform validate
+        
+    - name: Check Terraform Formatting
+      run: |
+        echo "🎨 Checking Terraform formatting..."
+        terraform fmt -check -recursive
+        
+    - name: Validate Environment Configs
+      run: |
+        echo "🔍 Validating environment-specific configurations..."
+        
+        for env in dev qa prod; do
+          if [ -f "${env}.tfvars" ]; then
+            echo "✅ Found ${env}.tfvars"
+            
+            # Check for required variables
+            if grep -q "deploy_base_infrastructure.*true" "${env}.tfvars"; then
+              echo "✅ ${env}.tfvars: unified deployment configured correctly"
+            else
+              echo "❌ ${env}.tfvars: deploy_base_infrastructure should be true"
+              exit 1
+            fi
+            
+            # Check for environment-specific naming
+            if grep -q "environment.*=.*\"${env}\"" "${env}.tfvars"; then
+              echo "✅ ${env}.tfvars: environment variable set correctly"
+            else
+              echo "❌ ${env}.tfvars: environment variable not set correctly"
+              exit 1
+            fi
+          else
+            echo "❌ Missing ${env}.tfvars file"
+            exit 1
+          fi
+        done
+        
+    - name: Validate Docker Configuration
+      run: |
+        echo "🐳 Validating Docker configuration..."
+        
+        if [ -f "docker/Dockerfile" ]; then
+          echo "✅ Dockerfile found"
+          
+          # Basic Dockerfile validation
+          if grep -q "FROM" docker/Dockerfile; then
+            echo "✅ Dockerfile has valid FROM instruction"
+          else
+            echo "❌ Dockerfile missing FROM instruction"
+            exit 1
+          fi
+        else
+          echo "❌ docker/Dockerfile not found"
+          exit 1
+        fi
+        
+    - name: Security Scan
+      run: |
+        echo "🔒 Running basic security checks..."
+        
+        # Check for hardcoded secrets in tfvars files
+        if grep -r -i "password\|secret\|key" *.tfvars | grep -v "arn:aws" | grep -v "#"; then
+          echo "❌ Potential hardcoded secrets found in tfvars files"
+          echo "Please use AWS Secrets Manager or environment variables"
+          exit 1
+        else
+          echo "✅ No hardcoded secrets detected"
+        fi
+        
+        # Check for overly permissive CIDR blocks
+        if grep -r "0.0.0.0/0" *.tfvars | grep -v "#"; then
+          echo "⚠️ Warning: Open CIDR blocks (0.0.0.0/0) found"
+          echo "Consider restricting access in production environments"
+        else
+          echo "✅ No overly permissive CIDR blocks found"
+        fi
+
+  plan:
+    name: Plan Changes for Each Environment
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.pull_request.base.ref == 'main' || github.event.pull_request.base.ref == 'qa' || github.event.pull_request.base.ref == 'prod'
+    strategy:
+      matrix:
+        environment: [dev, qa, prod]
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+        
+    - name: Initialize Terraform
+      run: |
+        ENV=${{ matrix.environment }}
+        echo "🔧 Initializing Terraform for environment: $ENV"
+        terraform init
+        terraform workspace select $ENV || terraform workspace new $ENV
+        
+    - name: Plan Changes
+      continue-on-error: true
+      run: |
+        ENV=${{ matrix.environment }}
+        echo "📋 Planning changes for environment: $ENV"
+        
+        # Create a safe plan that doesn't fail on missing resources
+        terraform plan -var-file="${ENV}.tfvars" -no-color -detailed-exitcode > plan-output.txt 2>&1 || {
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 2 ]; then
+            echo "✅ Changes detected in plan" >> plan-output.txt
+          else
+            echo "❌ Planning failed with exit code $EXIT_CODE" >> plan-output.txt
+          fi
+        }
+        
+        # Truncate plan output if too long
+        if [ $(wc -l < plan-output.txt) -gt 100 ]; then
+          head -50 plan-output.txt > plan-truncated.txt
+          echo "... (output truncated for brevity) ..." >> plan-truncated.txt
+          tail -50 plan-output.txt >> plan-truncated.txt
+          mv plan-truncated.txt plan-output.txt
+        fi
+        
+    - name: Comment Plan Results
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const planOutput = fs.readFileSync('plan-output.txt', 'utf8');
+          const env = '${{ matrix.environment }}';
+          
+          const body = `## 🗺️ Terraform Plan Results for \`${env}\` Environment
+          
+          <details>
+          <summary>Click to view plan output</summary>
+          
+          \`\`\`
+          ${planOutput}
+          \`\`\`
+          
+          </details>
+          
+          **Environment**: ${env}
+          **Triggered by**: @${{ github.actor }}
+          **PR**: #${{ github.event.number }}
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [validate, plan]
+    if: always()
+    
+    steps:
+    - name: Generate Summary
+      run: |
+        echo "## 🔍 PR Validation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Validation Results:" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.validate.result }}" == "success" ]; then
+          echo "- ✅ **Configuration Validation**: Passed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- ❌ **Configuration Validation**: Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ needs.plan.result }}" == "success" ]; then
+          echo "- ✅ **Terraform Planning**: Passed" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ needs.plan.result }}" == "skipped" ]; then
+          echo "- ⏭️ **Terraform Planning**: Skipped (not targeting main branch)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- ❌ **Terraform Planning**: Failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### PR Information:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Author**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Base Branch**: ${{ github.event.pull_request.base.ref }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Head Branch**: ${{ github.event.pull_request.head.ref }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Changed Files**: Infrastructure and configuration files" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+        echo "- Review the Terraform plan outputs above" >> $GITHUB_STEP_SUMMARY
+        echo "- Ensure all validation checks pass" >> $GITHUB_STEP_SUMMARY
+        echo "- Merge to trigger deployment to target environment" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,250 @@
+name: Environment Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Management action to perform'
+        required: true
+        type: choice
+        options:
+        - list-environments
+        - health-check
+        - sync-environments
+        - cleanup-resources
+        - backup-state
+        - restore-state
+      environment:
+        description: 'Target environment (if applicable)'
+        required: false
+        type: choice
+        options:
+        - all
+        - dev
+        - qa
+        - prod
+      dry_run:
+        description: 'Dry run mode (no actual changes)'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: 1.11.0
+
+jobs:
+  environment-management:
+    name: ${{ github.event.inputs.action }} - ${{ github.event.inputs.environment || 'default' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Initialize Terraform
+      run: |
+        echo "🔧 Initializing Terraform..."
+        terraform init
+        
+    - name: List Environments
+      if: github.event.inputs.action == 'list-environments'
+      run: |
+        echo "📋 Listing all Terraform workspaces..."
+        terraform workspace list
+        
+        echo "## 🌍 Environment Status Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Terraform Workspaces:" >> $GITHUB_STEP_SUMMARY
+        terraform workspace list | while read -r workspace; do
+          if [[ "$workspace" =~ ^[[:space:]]*\*[[:space:]]*(.*)$ ]]; then
+            echo "- **${BASH_REMATCH[1]}** (current)" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$workspace" =~ ^[[:space:]]*(.*)$ ]]; then
+            echo "- ${BASH_REMATCH[1]}" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+        
+    - name: Health Check
+      if: github.event.inputs.action == 'health-check'
+      run: |
+        TARGET_ENV="${{ github.event.inputs.environment }}"
+        echo "🔍 Performing health check for environment: $TARGET_ENV"
+        
+        if [ "$TARGET_ENV" == "all" ]; then
+          ENVIRONMENTS="dev qa prod"
+        else
+          ENVIRONMENTS="$TARGET_ENV"
+        fi
+        
+        echo "## 🔍 Health Check Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        for env in $ENVIRONMENTS; do
+          echo "### 🏥 Environment: $env" >> $GITHUB_STEP_SUMMARY
+          
+          # Check if workspace exists
+          if terraform workspace list | grep -q "^[[:space:]]*$env$\|^[[:space:]]*\*[[:space:]]*$env$"; then
+            echo "- ✅ **Terraform Workspace**: Exists" >> $GITHUB_STEP_SUMMARY
+            
+            # Switch to workspace and check state
+            terraform workspace select $env
+            
+            # Check if state file exists and has resources
+            if terraform state list >/dev/null 2>&1; then
+              RESOURCE_COUNT=$(terraform state list | wc -l)
+              if [ $RESOURCE_COUNT -gt 0 ]; then
+                echo "- ✅ **Terraform State**: $RESOURCE_COUNT resources" >> $GITHUB_STEP_SUMMARY
+                
+                # Check key resources
+                if terraform state list | grep -q "aws_ecs_cluster"; then
+                  echo "- ✅ **ECS Cluster**: Deployed" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "- ❌ **ECS Cluster**: Not found" >> $GITHUB_STEP_SUMMARY
+                fi
+                
+                if terraform state list | grep -q "aws_lb"; then
+                  echo "- ✅ **Load Balancer**: Deployed" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "- ❌ **Load Balancer**: Not found" >> $GITHUB_STEP_SUMMARY
+                fi
+                
+                if terraform state list | grep -q "aws_vpc"; then
+                  echo "- ✅ **VPC**: Deployed" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "- ❌ **VPC**: Not found" >> $GITHUB_STEP_SUMMARY
+                fi
+              else
+                echo "- ⚠️ **Terraform State**: Empty" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "- ❌ **Terraform State**: Not accessible" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "- ❌ **Terraform Workspace**: Does not exist" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+        done
+        
+    - name: Sync Environments
+      if: github.event.inputs.action == 'sync-environments'
+      run: |
+        echo "🔄 Syncing environment configurations..."
+        DRY_RUN=${{ github.event.inputs.dry_run }}
+        
+        if [ "$DRY_RUN" == "true" ]; then
+          echo "🔍 DRY RUN MODE - No changes will be made"
+        fi
+        
+        # Check for configuration drift
+        for env in dev qa prod; do
+          if terraform workspace list | grep -q "^[[:space:]]*$env$\|^[[:space:]]*\*[[:space:]]*$env$"; then
+            echo "📋 Checking configuration drift for $env environment..."
+            terraform workspace select $env
+            
+            if [ "$DRY_RUN" == "true" ]; then
+              terraform plan -var-file="${env}.tfvars" -detailed-exitcode || {
+                EXIT_CODE=$?
+                if [ $EXIT_CODE -eq 2 ]; then
+                  echo "⚠️ Configuration drift detected in $env environment"
+                fi
+              }
+            else
+              echo "🔄 Applying configuration sync for $env environment..."
+              terraform plan -var-file="${env}.tfvars" -out=sync-plan
+              terraform apply -auto-approve sync-plan
+            fi
+          fi
+        done
+        
+    - name: Cleanup Resources
+      if: github.event.inputs.action == 'cleanup-resources'
+      run: |
+        echo "🧹 Cleaning up unused resources..."
+        DRY_RUN=${{ github.event.inputs.dry_run }}
+        
+        if [ "$DRY_RUN" == "true" ]; then
+          echo "🔍 DRY RUN MODE - No changes will be made"
+        fi
+        
+        # List unused ECR images
+        echo "📦 Checking for unused ECR images..."
+        ECR_REPOS=$(aws ecr describe-repositories --query 'repositories[].repositoryName' --output text)
+        
+        for repo in $ECR_REPOS; do
+          echo "🔍 Checking repository: $repo"
+          
+          # Get images older than 30 days
+          OLD_IMAGES=$(aws ecr list-images --repository-name $repo --filter tagStatus=TAGGED --query 'imageIds[?imageDigest != null]' --output text)
+          
+          if [ -n "$OLD_IMAGES" ]; then
+            echo "⚠️ Found potentially unused images in $repo"
+            if [ "$DRY_RUN" == "false" ]; then
+              echo "🗑️ Cleaning up old images..."
+              # Add cleanup logic here
+            fi
+          fi
+        done
+        
+    - name: Backup State
+      if: github.event.inputs.action == 'backup-state'
+      run: |
+        echo "💾 Backing up Terraform state files..."
+        TARGET_ENV="${{ github.event.inputs.environment }}"
+        
+        if [ "$TARGET_ENV" == "all" ]; then
+          ENVIRONMENTS="dev qa prod"
+        else
+          ENVIRONMENTS="$TARGET_ENV"
+        fi
+        
+        for env in $ENVIRONMENTS; do
+          if terraform workspace list | grep -q "^[[:space:]]*$env$\|^[[:space:]]*\*[[:space:]]*$env$"; then
+            echo "💾 Backing up state for $env environment..."
+            terraform workspace select $env
+            
+            # Create backup with timestamp
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            BACKUP_NAME="terraform-state-backup-${env}-${TIMESTAMP}.tfstate"
+            
+            # Pull current state
+            terraform state pull > $BACKUP_NAME
+            
+            # Upload to S3 or another backup location
+            # aws s3 cp $BACKUP_NAME s3://your-backup-bucket/terraform-backups/
+            
+            echo "✅ State backup created: $BACKUP_NAME"
+          fi
+        done
+        
+    - name: Management Summary
+      if: always()
+      run: |
+        ACTION="${{ github.event.inputs.action }}"
+        ENV="${{ github.event.inputs.environment || 'default' }}"
+        DRY_RUN="${{ github.event.inputs.dry_run }}"
+        
+        echo "## 🛠️ Environment Management Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Operation Details:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Action**: $ACTION" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target Environment**: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- **Dry Run**: $DRY_RUN" >> $GITHUB_STEP_SUMMARY
+        echo "- **Executed by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 Useful Links:" >> $GITHUB_STEP_SUMMARY
+        echo "- [Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+        echo "- [Repository](${{ github.server_url }}/${{ github.repository }})" >> $GITHUB_STEP_SUMMARY

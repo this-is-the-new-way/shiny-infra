@@ -6,9 +6,9 @@ module "application_conditional" {
   source = "./modules/application"
   count  = var.deploy_base_infrastructure ? 1 : 0
 
-  # ECS Configuration - Use data source for app-only deployment, module outputs for unified deployment
-  cluster_id   = var.deploy_base_infrastructure ? module.ecs[0].cluster_id : data.aws_ecs_cluster.main[0].id
-  cluster_name = var.deploy_base_infrastructure ? module.ecs[0].cluster_name : data.aws_ecs_cluster.main[0].cluster_name
+  # ECS Configuration - Use module outputs for unified deployment
+  cluster_id   = module.ecs[0].cluster_id
+  cluster_name = module.ecs[0].cluster_name
 
   # Application Configuration
   app_name              = var.app_name

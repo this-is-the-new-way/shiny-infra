@@ -119,13 +119,6 @@ app_secrets = {
   # "DATABASE_PASSWORD" = "arn:aws:secretsmanager:us-east-1:123456789012:secret:qa-db-password"
 }
 
-# Health Check Configuration - Free Tier Optimized
-health_check_path                = "/health"  # Use health endpoint
-health_check_interval            = 30
-health_check_timeout             = 5
-health_check_healthy_threshold   = 2
-health_check_unhealthy_threshold = 2
-
 # Auto Scaling Configuration - Disabled for Free Tier
 enable_auto_scaling              = false  # Disable to save costs
 auto_scaling_target_cpu          = 70

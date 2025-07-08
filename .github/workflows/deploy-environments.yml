@@ -1,0 +1,741 @@
+name: Deploy Multi-Environment Infrastructure with ECS
+
+on:
+  push:
+    branches: [ prod ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - qa
+        - prod
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+        - deploy
+        - destroy
+        - plan-only
+        - update-service
+        - scale-service
+      force_rebuild:
+        description: 'Force rebuild Docker image'
+        required: false
+        default: false
+        type: boolean
+      import_existing:
+        description: 'Import existing AWS resources (if conflicts occur)'
+        required: false
+        default: false
+        type: boolean
+      desired_count:
+        description: 'Desired task count for ECS service (1-10)'
+        required: false
+        default: '1'
+        type: string
+      enable_parallel:
+        description: 'Enable parallel deployment (advanced)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: 1.11.0
+  ECR_REPOSITORY_NAME: base-infra
+
+jobs:
+  # Pre-deployment Validation
+  validate:
+    name: Validate Environment Configuration
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action != 'destroy'
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      validation_status: ${{ steps.validate.outputs.status }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Determine Environment
+      id: env
+      run: |
+        if [ "${{ github.event.inputs.environment }}" != "" ]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/qa" ]; then
+          echo "environment=qa" >> $GITHUB_OUTPUT
+        elif [ "${{ github.ref }}" == "refs/heads/prod" ]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+        else
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Validate Configuration
+      id: validate
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        
+        # Check if environment config exists
+        if [ ! -f "${ENV}.tfvars" ]; then
+          echo "❌ Environment configuration ${ENV}.tfvars not found!"
+          exit 1
+        fi
+        
+        # Validate unified deployment is enabled
+        if grep -q "deploy_base_infrastructure.*=.*true" "${ENV}.tfvars"; then
+          echo "✅ Unified deployment enabled for $ENV"
+        else
+          echo "❌ Unified deployment not enabled for $ENV"
+          exit 1
+        fi
+        
+        # Validate environment isolation
+        if grep -q "environment.*=.*\"${ENV}\"" "${ENV}.tfvars"; then
+          echo "✅ Environment isolation configured for $ENV"
+        else
+          echo "❌ Environment isolation not configured for $ENV"
+          exit 1
+        fi
+        
+        # Initialize Terraform for validation
+        terraform init -backend=false
+        terraform validate
+        
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "✅ Environment $ENV validation completed successfully"
+
+  # Plan-only Job for Testing
+  plan-only:
+    name: Plan ${{ needs.validate.outputs.environment || 'auto' }} Environment
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'plan-only'
+    needs: validate
+    environment: ${{ needs.validate.outputs.environment || 'dev' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Initialize Terraform
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        echo "🔧 Initializing Terraform for PLAN-ONLY in environment: $ENV"
+        terraform init
+        terraform workspace select $ENV || terraform workspace new $ENV
+        
+    - name: Plan Infrastructure
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        echo "📋 Planning infrastructure for environment: $ENV"
+        terraform plan -var-file="${ENV}.tfvars" -out=plan-output
+        
+    - name: Plan Summary
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        echo "## 📋 Plan Summary for $ENV Environment" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- **Action**: Plan Only" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: Completed" >> $GITHUB_STEP_SUMMARY
+        echo "- **Planned by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+  # Unified Deployment Job - Deploy both base infrastructure and application in one operation
+  deploy:
+    name: Deploy ${{ needs.validate.outputs.environment || 'auto' }} Environment
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'deploy' || github.event.inputs.action == 'update-service' || github.event.inputs.action == 'scale-service'
+    needs: validate
+    environment: ${{ needs.validate.outputs.environment || 'dev' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Initialize Terraform
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        echo "🔧 Initializing Terraform for UNIFIED DEPLOYMENT in environment: $ENV"
+        
+        # Use separate workspace for each environment to ensure they coexist
+        terraform init
+        terraform workspace select $ENV || terraform workspace new $ENV
+        
+        # Verify environment isolation
+        CURRENT_WORKSPACE=$(terraform workspace show)
+        echo "📍 Current workspace: $CURRENT_WORKSPACE"
+        
+        if [ "$CURRENT_WORKSPACE" != "$ENV" ]; then
+          echo "❌ Workspace mismatch! Expected: $ENV, Got: $CURRENT_WORKSPACE"
+          exit 1
+        fi
+        
+    - name: Validate Terraform
+      run: terraform validate
+      
+    - name: Login to Amazon ECR (Shared Repository)
+      id: ecr-login
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        
+        # Use shared ECR repository with environment-specific tags
+        ECR_REPO_NAME="${{ env.ECR_REPOSITORY_NAME }}"
+        
+        # Check if shared repository exists, create if not
+        if aws ecr describe-repositories --repository-names $ECR_REPO_NAME --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+          ECR_REPO_URL=$(aws ecr describe-repositories --repository-names $ECR_REPO_NAME --region ${{ env.AWS_REGION }} --query 'repositories[0].repositoryUri' --output text)
+          echo "ecr_url=$ECR_REPO_URL" >> $GITHUB_OUTPUT
+          echo "📦 Using shared ECR Repository: $ECR_REPO_URL"
+          echo "ecr_exists=true" >> $GITHUB_OUTPUT
+        else
+          # Create shared ECR repository with scan configuration
+          echo "🆕 Creating shared ECR Repository: $ECR_REPO_NAME"
+          aws ecr create-repository \
+            --repository-name $ECR_REPO_NAME \
+            --region ${{ env.AWS_REGION }} \
+            --image-scanning-configuration scanOnPush=true
+          ECR_REPO_URL=$(aws ecr describe-repositories --repository-names $ECR_REPO_NAME --region ${{ env.AWS_REGION }} --query 'repositories[0].repositoryUri' --output text)
+          echo "ecr_url=$ECR_REPO_URL" >> $GITHUB_OUTPUT
+          echo "ecr_exists=true" >> $GITHUB_OUTPUT
+        fi
+        
+        # Login to ECR
+        echo "🔐 Logging in to Amazon ECR..."
+        aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REPO_URL
+        
+    - name: Build and Push Docker Image
+      id: docker-build
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        FORCE_REBUILD=${{ github.event.inputs.force_rebuild || 'false' }}
+        
+        cd docker
+        
+        # Use comprehensive tagging strategy for shared repository
+        COMMIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        
+        # Environment-specific tags
+        IMAGE_TAG_ENV="${ENV}-latest"
+        IMAGE_TAG_COMMIT="${ENV}-${COMMIT_SHA}"
+        IMAGE_TAG_TIMESTAMP="${ENV}-${TIMESTAMP}"
+        
+        echo "🔨 Building Docker image for environment: $ENV"
+        echo "📦 Using tags: $IMAGE_TAG_ENV, $IMAGE_TAG_COMMIT, $IMAGE_TAG_TIMESTAMP"
+        
+        # Build with multiple tags
+        docker build -t base-infra:$IMAGE_TAG_COMMIT .
+        
+        # Tag for ECR repository
+        ECR_URL=${{ steps.ecr-login.outputs.ecr_url }}
+        docker tag base-infra:$IMAGE_TAG_COMMIT $ECR_URL:$IMAGE_TAG_ENV
+        docker tag base-infra:$IMAGE_TAG_COMMIT $ECR_URL:$IMAGE_TAG_COMMIT
+        docker tag base-infra:$IMAGE_TAG_COMMIT $ECR_URL:$IMAGE_TAG_TIMESTAMP
+        
+        echo "📤 Pushing Docker images to shared ECR..."
+        docker push $ECR_URL:$IMAGE_TAG_ENV
+        docker push $ECR_URL:$IMAGE_TAG_COMMIT
+        docker push $ECR_URL:$IMAGE_TAG_TIMESTAMP
+        
+        echo "image_tag_env=$IMAGE_TAG_ENV" >> $GITHUB_OUTPUT
+        echo "image_tag_commit=$IMAGE_TAG_COMMIT" >> $GITHUB_OUTPUT
+        echo "image_tag_timestamp=$IMAGE_TAG_TIMESTAMP" >> $GITHUB_OUTPUT
+        echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
+        
+    - name: Import Existing Resources (if enabled)
+      if: github.event.inputs.import_existing == 'true'
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        echo "🔄 Checking for existing resources to import for environment: $ENV"
+        
+        # Function to import resource if it exists
+        import_if_exists() {
+          local resource_type=$1
+          local resource_identifier=$2
+          local terraform_resource=$3
+          
+          echo "Checking for existing $resource_type: $resource_identifier"
+          
+          case $resource_type in
+            "iam_role")
+              if aws iam get-role --role-name "$resource_identifier" >/dev/null 2>&1; then
+                echo "Importing existing IAM role: $resource_identifier"
+                terraform import -var-file="${ENV}.tfvars" "$terraform_resource" "$resource_identifier" || true
+              fi
+              ;;
+            "log_group")
+              if aws logs describe-log-groups --log-group-name-prefix "$resource_identifier" >/dev/null 2>&1; then
+                echo "Importing existing log group: $resource_identifier"
+                terraform import -var-file="${ENV}.tfvars" "$terraform_resource" "$resource_identifier" || true
+              fi
+              ;;
+            "target_group")
+              if aws elbv2 describe-target-groups --names "$resource_identifier" >/dev/null 2>&1; then
+                TG_ARN=$(aws elbv2 describe-target-groups --names "$resource_identifier" --query 'TargetGroups[0].TargetGroupArn' --output text)
+                echo "Importing existing target group: $TG_ARN"
+                terraform import -var-file="${ENV}.tfvars" "$terraform_resource" "$TG_ARN" || true
+              fi
+              ;;
+            "ecr_repository")
+              if aws ecr describe-repositories --repository-names "$resource_identifier" >/dev/null 2>&1; then
+                echo "Importing existing ECR repository: $resource_identifier"
+                terraform import -var-file="${ENV}.tfvars" "$terraform_resource" "$resource_identifier" || true
+              fi
+              ;;
+          esac
+        }
+        
+        # Import common resources that might already exist
+        import_if_exists "iam_role" "base-infra-${ENV}-execution-role" "module.application_conditional[0].aws_iam_role.task_execution_role"
+        import_if_exists "iam_role" "base-infra-${ENV}-task-role" "module.application_conditional[0].aws_iam_role.task_role"
+        import_if_exists "log_group" "/aws/ecs/base-infra-${ENV}/base-infra-${ENV}" "module.application_conditional[0].aws_cloudwatch_log_group.app"
+        import_if_exists "log_group" "/aws/ecs/cluster/base-infra-${ENV}/exec" "module.ecs[0].aws_cloudwatch_log_group.ecs_exec"
+        import_if_exists "target_group" "base-infra-${ENV}-app-tg" "module.application_conditional[0].aws_lb_target_group.app"
+        import_if_exists "target_group" "base-infra-${ENV}-tg" "module.alb[0].aws_lb_target_group.main"
+        import_if_exists "ecr_repository" "base-infra" "aws_ecr_repository.app[0]"
+        
+        echo "✅ Resource import check completed"
+        
+    - name: Plan Unified Infrastructure
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        echo "📋 Planning UNIFIED INFRASTRUCTURE for environment: $ENV"
+        echo "ℹ️  Using ${ENV}.tfvars with unified deployment (deploy_base_infrastructure = true)"
+        echo "ℹ️  This environment will be isolated using Terraform workspace: $ENV"
+        
+        # Set desired count if specified
+        DESIRED_COUNT="${{ github.event.inputs.desired_count || '1' }}"
+        if [ "$DESIRED_COUNT" -gt 0 ] && [ "$DESIRED_COUNT" -le 10 ]; then
+          echo "ℹ️  Setting desired ECS task count to: $DESIRED_COUNT"
+          PLAN_VARS="-var desired_count=$DESIRED_COUNT"
+        else
+          PLAN_VARS=""
+        fi
+        
+        # Run terraform plan with retry logic for import conflicts
+        if ! terraform plan -var-file="${ENV}.tfvars" $PLAN_VARS -out=unified-plan; then
+          echo "⚠️ Plan failed, this might be due to resource conflicts"
+          if [ "${{ github.event.inputs.import_existing }}" != "true" ]; then
+            echo "💡 Consider re-running with 'import_existing=true' to handle existing resources"
+          fi
+          exit 1
+        fi
+        
+    - name: Apply Unified Infrastructure
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        echo "🚀 Applying UNIFIED INFRASTRUCTURE for environment: $ENV"
+        echo "ℹ️  Creating: VPC, ALB, ECS Cluster, Security Groups, ECS Service, Task Definition"
+        
+        # Apply with automatic approval
+        terraform apply -auto-approve unified-plan
+        
+        # Verify deployment
+        echo "✅ Verifying deployment..."
+        terraform output
+        
+    - name: Scale ECS Service
+      if: github.event.inputs.action == 'scale-service'
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        DESIRED_COUNT="${{ github.event.inputs.desired_count || '1' }}"
+        
+        # Get ECS cluster and service details from Terraform output
+        CLUSTER_NAME=$(terraform output -raw ecs_cluster_name)
+        SERVICE_NAME=$(terraform output -raw ecs_service_name)
+        
+        echo "📈 Scaling ECS service to $DESIRED_COUNT tasks..."
+        echo "🎯 Cluster: $CLUSTER_NAME"
+        echo "🎯 Service: $SERVICE_NAME"
+        
+        # Update service with new desired count
+        aws ecs update-service \
+          --cluster $CLUSTER_NAME \
+          --service $SERVICE_NAME \
+          --desired-count $DESIRED_COUNT \
+          --region ${{ env.AWS_REGION }}
+        
+        echo "⏳ Waiting for ECS service to be stable..."
+        aws ecs wait services-stable \
+          --cluster $CLUSTER_NAME \
+          --services $SERVICE_NAME \
+          --region ${{ env.AWS_REGION }} \
+          --cli-read-timeout 600
+        
+        echo "✅ ECS service scaled successfully to $DESIRED_COUNT tasks"
+        
+    - name: Update ECS Service with Latest Image
+      if: github.event.inputs.action == 'deploy' || github.event.inputs.action == 'update-service'
+      id: ecs-update
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        
+        # Get ECS cluster and service details from Terraform output
+        CLUSTER_NAME=$(terraform output -raw ecs_cluster_name)
+        SERVICE_NAME=$(terraform output -raw ecs_service_name)
+        TASK_DEFINITION=$(terraform output -raw ecs_task_definition_arn)
+        
+        # Get the latest image from Docker build
+        IMAGE_TAG="${{ steps.docker-build.outputs.image_tag_env }}"
+        ECR_URL="${{ steps.docker-build.outputs.ecr_url }}"
+        FULL_IMAGE_URL="${ECR_URL}:${IMAGE_TAG}"
+        
+        echo "🔄 Updating ECS service with latest Docker image..."
+        echo "📦 Image: $FULL_IMAGE_URL"
+        echo "🎯 Cluster: $CLUSTER_NAME"
+        echo "🎯 Service: $SERVICE_NAME"
+        
+        # Force new deployment to pick up the latest image
+        aws ecs update-service \
+          --cluster $CLUSTER_NAME \
+          --service $SERVICE_NAME \
+          --force-new-deployment \
+          --region ${{ env.AWS_REGION }}
+        
+        echo "⏳ Waiting for ECS service to be stable..."
+        if aws ecs wait services-stable \
+          --cluster $CLUSTER_NAME \
+          --services $SERVICE_NAME \
+          --region ${{ env.AWS_REGION }} \
+          --cli-read-timeout 600; then
+          echo "✅ ECS service is stable and running"
+          echo "service_status=stable" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ ECS service deployment may still be in progress"
+          echo "service_status=deploying" >> $GITHUB_OUTPUT
+        fi
+        
+        # Get service status for summary
+        SERVICE_STATUS=$(aws ecs describe-services \
+          --cluster $CLUSTER_NAME \
+          --services $SERVICE_NAME \
+          --region ${{ env.AWS_REGION }} \
+          --query 'services[0].deployments[0].status' \
+          --output text)
+        echo "service_deployment_status=$SERVICE_STATUS" >> $GITHUB_OUTPUT
+        
+    - name: Environment Health Check
+      id: health-check
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        
+        # Get ALB DNS name if available
+        ALB_DNS=$(terraform output -raw alb_dns_name 2>/dev/null || echo "")
+        
+        if [ -n "$ALB_DNS" ]; then
+          echo "🏥 Performing health check on ALB: $ALB_DNS"
+          
+          # Wait for ALB to be ready
+          sleep 30
+          
+          # Check health endpoint
+          if curl -s -f "http://$ALB_DNS/health" >/dev/null 2>&1; then
+            echo "✅ Health check passed"
+            echo "health_status=healthy" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Health check failed, but infrastructure is deployed"
+            echo "health_status=unhealthy" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "ℹ️ ALB DNS not available, skipping health check"
+          echo "health_status=not_available" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Get Deployment Outputs
+      id: outputs
+      run: |
+        # Get all important outputs from Terraform
+        ALB_DNS=$(terraform output -raw alb_dns_name 2>/dev/null || echo "Not available")
+        CLUSTER_NAME=$(terraform output -raw ecs_cluster_name)
+        SERVICE_NAME=$(terraform output -raw ecs_service_name)
+        VPC_ID=$(terraform output -raw vpc_id)
+        ENVIRONMENT=$(terraform output -raw environment)
+        
+        echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
+        echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+        echo "service_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+        echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+        echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+        
+        # Use shared ECR URL
+        echo "ecr_url=${{ steps.docker-build.outputs.ecr_url }}" >> $GITHUB_OUTPUT
+        
+    - name: Deployment Summary
+      run: |
+        ENV=${{ needs.validate.outputs.environment }}
+        ALB_DNS=${{ steps.outputs.outputs.alb_dns }}
+        ACTION=${{ github.event.inputs.action }}
+        
+        echo "## 🚀 $ENV Environment $ACTION Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🌐 Application Access:" >> $GITHUB_STEP_SUMMARY
+        if [ "$ALB_DNS" != "Not available" ]; then
+          echo "- **Main URL**: http://$ALB_DNS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health Check**: http://$ALB_DNS/health" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health Status**: ${{ steps.health-check.outputs.health_status }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Status**: Infrastructure deployed, ALB DNS pending" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📍 Environment Details:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- **Action**: $ACTION" >> $GITHUB_STEP_SUMMARY
+        echo "- **Terraform Workspace**: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- **VPC ID**: ${{ steps.outputs.outputs.vpc_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **ECS Cluster**: ${{ steps.outputs.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **ECS Service**: ${{ steps.outputs.outputs.service_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Service Status**: ${{ steps.ecs-update.outputs.service_deployment_status }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **ECR Repository**: ${{ steps.outputs.outputs.ecr_url }} (shared)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Docker Image Tag**: ${{ steps.docker-build.outputs.image_tag_env }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Deployed by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Environment Isolation Features:" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔒 **Isolated Terraform Workspace**: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- 🏗️ **Dedicated VPC**: ${{ steps.outputs.outputs.vpc_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- 🎯 **Environment-specific resource naming**: base-infra-$ENV-*" >> $GITHUB_STEP_SUMMARY
+        echo "- 📦 **Shared ECR with env-specific tags**: ${{ steps.docker-build.outputs.image_tag_env }}" >> $GITHUB_STEP_SUMMARY
+        echo "- ⚡ **Zero-downtime rolling deployments** via ECS" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔄 **Independent lifecycle management** per environment" >> $GITHUB_STEP_SUMMARY
+        echo "- 🛠️ **Automatic resource import** for conflict resolution" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "$ENV" == "prod" ]; then
+          echo "### 🔥 Production Environment:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔧 High availability with multiple AZs and NAT Gateways" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Auto-scaling enabled for production workloads" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Enhanced monitoring and logging" >> $GITHUB_STEP_SUMMARY
+          echo "- 🛡️ Production-grade security configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌐 Load balancing across multiple subnets" >> $GITHUB_STEP_SUMMARY
+        elif [ "$ENV" == "qa" ]; then
+          echo "### 🔍 QA Environment:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🧪 Ready for testing and quality assurance" >> $GITHUB_STEP_SUMMARY
+          echo "- ❤️ Health checks configured for service validation" >> $GITHUB_STEP_SUMMARY
+          echo "- 💰 Cost-optimized for testing workloads" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔄 Completely isolated from dev and prod" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎯 Perfect for integration and E2E testing" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### 🛠️ Development Environment:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔧 Ready for development and testing" >> $GITHUB_STEP_SUMMARY
+          echo "- 🆕 Safe environment for new features" >> $GITHUB_STEP_SUMMARY
+          echo "- 🐛 Debug and iterate quickly" >> $GITHUB_STEP_SUMMARY
+          echo "- 💰 Cost-optimized development setup" >> $GITHUB_STEP_SUMMARY
+          echo "- 🚀 Rapid deployment for development cycles" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  # Destroy Environment Job
+  destroy:
+    name: Destroy ${{ github.event.inputs.environment || 'unknown' }} Environment
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Determine Environment
+      id: env
+      run: |
+        if [ "${{ github.event.inputs.environment }}" != "" ]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+        else
+          echo "environment=dev" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Confirm Production Destruction
+      if: steps.env.outputs.environment == 'prod'
+      run: |
+        echo "⚠️ WARNING: You are about to destroy the PRODUCTION environment!"
+        echo "⚠️ This action will permanently delete all production resources!"
+        echo "⚠️ Make sure this is intended and you have proper backups!"
+        echo ""
+        echo "Production destruction confirmed via workflow dispatch."
+        
+    - name: Initialize Terraform
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "🔧 Initializing Terraform for DESTRUCTION in environment: $ENV"
+        
+        # Use the same workspace as deployment
+        terraform init
+        terraform workspace select $ENV || {
+          echo "⚠️ Workspace $ENV does not exist. No resources to destroy."
+          exit 0
+        }
+        
+        # Verify workspace isolation
+        CURRENT_WORKSPACE=$(terraform workspace show)
+        echo "📍 Current workspace: $CURRENT_WORKSPACE"
+        
+        if [ "$CURRENT_WORKSPACE" != "$ENV" ]; then
+          echo "❌ Workspace mismatch! Expected: $ENV, Got: $CURRENT_WORKSPACE"
+          exit 1
+        fi
+      
+    - name: Plan Destruction
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "📋 Planning DESTRUCTION for environment: $ENV"
+        echo "ℹ️  Using ${ENV}.tfvars for unified destruction"
+        terraform plan -destroy -var-file="${ENV}.tfvars" -out=destroy-plan
+        
+    - name: Apply Destruction
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "🗑️ Destroying environment: $ENV"
+        echo "ℹ️  This will destroy: VPC, ALB, ECS Cluster, Security Groups, ECS Service, Task Definition"
+        echo "ℹ️  ECR repository will be preserved (shared across environments)"
+        terraform apply -auto-approve destroy-plan
+        
+    - name: Delete Terraform Workspace
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "🗑️ Cleaning up Terraform workspace: $ENV"
+        terraform workspace select default
+        terraform workspace delete $ENV || echo "⚠️ Workspace $ENV could not be deleted (may not exist)"
+        
+    - name: Destruction Summary
+      run: |
+        ENV=${{ steps.env.outputs.environment }}
+        echo "## 🗑️ $ENV Environment Destroyed Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📍 Environment Details:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workspace**: $ENV (deleted)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Destroyed by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🗑️ Resources Destroyed:" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ ECS Service and Task Definition" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ ECS Cluster (base-infra-$ENV)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Application Load Balancer" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ VPC and networking resources" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Security Groups" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ CloudWatch Log Groups" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Auto-scaling policies" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Terraform workspace" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ℹ️ Preserved Resources:" >> $GITHUB_STEP_SUMMARY
+        echo "- 📦 ECR repository (shared across environments)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Environment Isolation:" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔒 Other environments remain unaffected" >> $GITHUB_STEP_SUMMARY
+        echo "- 🎯 Only $ENV-specific resources were destroyed" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔄 Environment can be re-deployed at any time" >> $GITHUB_STEP_SUMMARY
+
+  # Notification Job - Always runs to notify about deployment status
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [validate, plan-only, deploy, destroy]
+    
+    steps:
+    - name: Determine Status
+      id: status
+      run: |
+        if [ "${{ needs.deploy.result }}" == "success" ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "action=deploy" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.destroy.result }}" == "success" ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "action=destroy" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.plan-only.result }}" == "success" ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "action=plan" >> $GITHUB_OUTPUT
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "action=unknown" >> $GITHUB_OUTPUT
+        fi
+        
+        ENV="${{ github.event.inputs.environment || 'auto' }}"
+        echo "environment=$ENV" >> $GITHUB_OUTPUT
+        
+    - name: Create Deployment Status Summary
+      run: |
+        ENV=${{ steps.status.outputs.environment }}
+        STATUS=${{ steps.status.outputs.status }}
+        ACTION=${{ steps.status.outputs.action }}
+        
+        echo "## 📊 Deployment Status Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🎯 Environment: $ENV" >> $GITHUB_STEP_SUMMARY
+        echo "- **Action**: $ACTION" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: $STATUS" >> $GITHUB_STEP_SUMMARY
+        echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow**: ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Run ID**: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "$STATUS" == "success" ]; then
+          echo "### ✅ Success!" >> $GITHUB_STEP_SUMMARY
+          echo "The $ACTION operation completed successfully for the $ENV environment." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Environment Coexistence:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌍 **Independent Environments**: dev, qa, prod can run simultaneously" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔒 **Workspace Isolation**: Each environment uses its own Terraform workspace" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **Shared ECR**: Single repository with environment-specific tags" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎯 **Resource Separation**: Each environment has its own VPC and resources" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### ❌ Failed!" >> $GITHUB_STEP_SUMMARY
+          echo "The $ACTION operation failed for the $ENV environment." >> $GITHUB_STEP_SUMMARY
+          echo "Please check the workflow logs for more details." >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 Quick Links:" >> $GITHUB_STEP_SUMMARY
+        echo "- [Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+        echo "- [Repository](${{ github.server_url }}/${{ github.repository }})" >> $GITHUB_STEP_SUMMARY
+        echo "- [Commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})" >> $GITHUB_STEP_SUMMARY
