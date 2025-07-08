@@ -4,22 +4,22 @@ resource "aws_security_group" "alb" {
   description = "Security group for Application Load Balancer"
   vpc_id      = var.vpc_id
 
-  # HTTP access from anywhere
+  # HTTP access - restricted or open based on configuration
   ingress {
     description = "HTTP"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.enable_restricted_access ? var.allowed_ip_addresses : ["0.0.0.0/0"]
   }
 
-  # HTTPS access from anywhere
+  # HTTPS access - restricted or open based on configuration
   ingress {
     description = "HTTPS"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.enable_restricted_access ? var.allowed_ip_addresses : ["0.0.0.0/0"]
   }
 
   # Allow all outbound traffic

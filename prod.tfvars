@@ -162,3 +162,7 @@ additional_tags = {
   Backup       = "required"
   Monitoring   = "critical"
 }
+
+# Security Configuration - RESTRICTED ACCESS
+enable_restricted_access = true
+allowed_ip_addresses     = ["173.33.19.46/32"]  # Your current IP address

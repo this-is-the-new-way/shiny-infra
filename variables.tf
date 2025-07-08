@@ -455,4 +455,17 @@ variable "deploy_application" {
   default     = true
 }
 
+# Security Configuration Variables
+variable "enable_restricted_access" {
+  description = "Enable restricted access to ALB (when true, only allowed_ip_addresses can access)"
+  type        = bool
+  default     = false
+}
+
+variable "allowed_ip_addresses" {
+  description = "List of IP addresses/CIDR blocks allowed to access the ALB"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]  # Default to open access for backward compatibility
+}
+
 

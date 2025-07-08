@@ -37,6 +37,10 @@ module "security" {
   vpc_id      = var.deploy_base_infrastructure ? module.vpc[0].vpc_id : null
   vpc_cidr    = var.vpc_cidr
 
+  # IP-based access control
+  enable_restricted_access = var.enable_restricted_access
+  allowed_ip_addresses     = var.allowed_ip_addresses
+
   tags = local.common_tags
 }
 

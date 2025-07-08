@@ -96,3 +96,7 @@ enable_container_insights = false # Disable to save costs
 # Monitoring Configuration
 enable_detailed_monitoring = false
 # notification_topic_arn   = "arn:aws:sns:us-east-1:123456789012:dev-alerts"
+
+# Security Configuration - RESTRICTED ACCESS
+enable_restricted_access = true
+allowed_ip_addresses     = ["173.33.19.46/32"]  # Your current IP address
